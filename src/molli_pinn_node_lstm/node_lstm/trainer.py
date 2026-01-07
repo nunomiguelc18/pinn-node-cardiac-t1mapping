@@ -1,9 +1,4 @@
-from __future__ import annotations
-import logging
 
-LOGGER = logging.getLogger(__name__)
-#Collate masks for validation so they are fixed for MC dropring !! we cna remove that, w eju colate
-# and assume a for loop in validation
 
 
 # Is this trainer fine? keep nn.Module? how to save checkpoints? of optimzer and scheduler? stand what other methods to keep? it's fine to import like this ? the dataloader?
@@ -14,110 +9,137 @@ LOGGER = logging.getLogger(__name__)
 # Implement the rest
 # Implement the loggers using tensorboard
 
+from __future__ import annotations
+import logging
+
+LOGGER = logging.getLogger(__name__)
 import torch.nn as nn
-from typing import Dict, List, Union
 import torch
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.optim import AdamW
 import numpy as np
 import random
-from molli_pinn_node_lstm.utils import molli_signal_model
 from torch.utils.data import DataLoader
-from collections import defaultdict
 from molli_pinn_node_lstm.utils import molli_signal_model
 from molli_pinn_node_lstm.training import SignalRecoveryLoss
+from torch.utils.tensorboard import SummaryWriter
+from dataclasses import dataclass
+import tqdm
+
+@dataclass(frozen=True)
+class TrainerConfig:
+    epochs: int
+    num_acquisitions: int
+    max_acquisitions: int
+    p_full_seq: float = 0.1
+    p_interpolation: float = 0.1
+    interpolate_readouts: bool = False
+    val_mc_samples: int = 10
+    device : str = 'cpu'
+
+    def __post_init__(self):
+        if not (0 < self.num_acquisitions <= self.max_acquisitions):
+            raise ValueError("Number of points must lie within the set of integers {1,2,..max_num_points}.")
+        self.p_interpolation = np.clip(self.p_interpolation,0,1, dtype=np.float32)
+        self.p_full_seq = np.clip(self.p_full_seq,0.0,1.0, dtype=np.float32)
+        self.epoch = max(1, int(self.epoch))
+        self.val_MC_samples = max(1,int(self.val_MC_samples))
+
+        
+
 
 class Trainer(nn.Module):
-    def __init__(self, model: nn.Module, 
+    def __init__(self, 
+                 trainer_cfg: TrainerConfig,
+                 model: nn.Module, 
                  optimizer: AdamW,
                  scheduler: ExponentialLR,
+                 tensorboard_logger: SummaryWriter,
                  molli_loss: SignalRecoveryLoss, 
-                 training_set: DataLoader,
-                 validation_set: DataLoader,
-                 num_acquisitions: int, 
-                 max_acquisitions: int, 
-                 epochs: int, 
-                 interpolate_readouts: bool, 
-                 p_interpolation: float,
-                 p_full_seq: float, 
-                 validation: bool, 
-                 val_MC_samples: int,
                  tvec_normalization_const: float, 
-                 signal_normalization_const: float):
+                 signal_normalization_const: float,
+                 device: str):
         super().__init__()
-        if 0 < num_acquisitions <= max_acquisitions:
-            raise ValueError("Number of points must lie within the set of integers {1,2,..max_num_points}.")
-        if epochs <= 0:
-            raise ValueError("Number of Epochs must be > 0.")
-        
+
+        self.trainer_cfg = trainer_cfg
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
+        self.tensorboard_logger = tensorboard_logger
         self.molli_loss = molli_loss
-        self.training_set = training_set
-        self.validaiton_set = validation_set
-        self.num_points = int(num_acquisitions)
-        self.max_acquisitions = int(max_acquisitions)
-        self.p_full_seq = np.clip(p_full_seq,0,1)
-        self.epochs = int(epochs)
-        self.interpolate_readouts = bool(interpolate_readouts)
-        self.p_interpolation = p_interpolation if interpolate_readouts else 0.0
-        self.validation = bool(validation)
-        self.val_MC_samples = int(val_MC_samples)
+        self.val_MC_masks = self._collate_validation_masks()
+
         self.tvec_normalization_const = float(tvec_normalization_const)
         self.signal_normalization_const = float(signal_normalization_const)
+        self.device = device
 
-        self.train_epoch_losses = defaultdict(list)
-        self.val_epoch_losses = defaultdict(list)
+
         self.best_valid_loss = float('inf')
+        train_history = {"train/total_loss": [], "train/T1": [], "train/S(t)": [], "val/dS(t)/dt": [],  "lr": []}
+        val_history = {"train/total_loss": [], "train/T1": [], "train/S(t)": [], "val/dS(t)/dt": [],  "lr": []}
+
+    def fit(self,training_set: DataLoader,validation_set: DataLoader) -> None:
+        epoch_pbar = tqdm(range(1,self.trainer_cfg.epoch + 1), desc = "Epoch")
+        for epoch in epoch_pbar:
+            train_loss = self.run_training(training_set)
+            #val_loss = self.run_training(validation_set)
 
 
+            #self.tensorboard_logger.add_scalar("lr", self.optimizer.param_groups[0]["lr"], epoch + 1)
 
-    def run_training(self):
-        logging.info('Training Epoch Started')
-        for epoch in range(self.epochs):
-            self.model.train()
-            tmp_train_loss = defaultdict(list)
-            logging.info(f"Training on Epoch {epoch +1 :4d}/{self.epochs}")
-            for _, batch in self.training_set:
-                self.optimizer.zero_grad()
-                batch = self._to_device(**batch)
-                
-                if random.random() <= 0.1:
-                    tmp_acquisitions = self._interpolate_molli_readouts(**batch)
-                    batch.update(tmp_acquisitions)
-
-                mask = self._generate_random_mask(MC_sampling=False)
-                tmp_vol, tmp_tvec = batch['volume'][:, mask], batch['tvec'][mask]
-
-                pmap_hat = self.model(volume = tmp_vol, tvec = tmp_tvec)
-                
-                train_loss = self.molli_loss.compute_loss(pmap_ref = batch['pmap'], T1_ref = batch['molli_t1_ref'], pmap_hat = pmap_hat)
-                
-                total_loss = train_loss['total_loss']
-                total_loss.backward()
-                self.optimizer.step()
-
-                #self.update_loss_stats(ref_dict = tmp_train_loss, updates_dict=train_loss)
-
-    @torch.no_grad()
-    def run_validation(self):
-        logging.info(f"Running Validation")
-        self.model.eval()
-        tmp_val_loss= defaultdict(list)
-        for _, batch in self.validaiton_set:
+    def run_training(self, training_set: DataLoader):
+        self.model.train()
+        sums = {"total_loss": 0.0, "T1": 0.0, "S(t)": 0.0, "dS(t)/dt": 0.0}
+        batch_accum = int(0)
+        batch_pbar = tqdm(training_set, desc = 'Training', leave=False)
+        for batch in batch_pbar:
+            self.optimizer.zero_grad()
             batch = self._to_device(**batch)
-            
-
-            random_mask = self._generate_random_mask(MC_sampling=True)
-            
-            # Run Monte-Carlo sampling 
-            for mask in random_mask:
-                tmp_vol, tmp_tvec = batch['volume'][:, mask], batch['tvec'][random_mask]
-                pmap_hat = self.model(volume = tmp_vol, tvec = tmp_tvec)
-                val_loss = self.molli_loss.compute_loss(pmap_ref = batch['pmap'], T1_ref = batch['molli_t1_ref'], pmap_hat = pmap_hat)
                 
+            if random.random() <= self.trainer_cfg.p_interpolation:
+                tmp_acquisitions = self._interpolate_molli_readouts(**batch)
+                batch.update(tmp_acquisitions)
 
+            mask = self._sample_random_mask()
+            tmp_vol, tmp_tvec = batch['volume'][..., mask], batch['tvec'][mask]
+            b = tmp_vol.shape[0]
+
+            pmap_hat = self.model(volume = tmp_vol, tvec = tmp_tvec)
+            train_loss = self.molli_loss.compute_loss(pmap_ref = batch['pmap'], T1_ref = batch['molli_t1_ref'], pmap_hat = pmap_hat)
+            
+            total_loss = train_loss['total_loss']
+            total_loss.backward()
+            self.optimizer.step()
+
+            batch_accum += b
+            for key,value in train_loss.items():
+                sums[key] += value.item() * b
+            
+            batch_pbar.set_postfix(train_total_loss = train_loss["total_loss"], train_T1_loss = train_loss["T1"], train_St_loss = train_loss["S(t)"], train_dSdt_loss = train_loss["dS(t)/dt"])
+        
+        epoch_loss = {key : (value / batch_accum) for key,value in sums.items()}
+        return epoch_loss
+
+    # @torch.no_grad()
+    # def run_validation(self, validation_set: DataLoader):
+    #     self.model.eval()
+    #     sums = {"total_loss": 0.0, "T1": 0.0, "S(t)": 0.0, "dS(t)/dt": 0.0}
+    #     batch_accum = int(0)
+    #     batch_pbar = tqdm(validation_set, desc = 'Validation', leave=False)
+    #     for batch in batch_pbar:
+    #         batch = self._to_device(**batch)
+    #         # Run Monte-Carlo sampling 
+    #         for mask in self.val_MC_masks:
+    #             tmp_vol, tmp_tvec = batch['volume'][..., mask], batch['tvec'][mask]
+    #             b = tmp_vol.shape[0]
+
+    #             pmap_hat = self.model(volume = tmp_vol, tvec = tmp_tvec)
+    #             val_loss = self.molli_loss.compute_loss(pmap_ref = batch['pmap'], T1_ref = batch['molli_t1_ref'], pmap_hat = pmap_hat)
+    #             tmp_batch_accum += b
+    #             for key,value in val_loss.items():
+    #                 tmp_val_loss[key] += value.item() * b
+    #     for key,value in tmp_val_loss.items():
+    #         self.tensorboard_logger.add_scalar(f"loss/val/{key}",value, epoch + 1)
 
     def _interpolate_molli_readouts(self, tvec: torch.Tensor, pmap: torch.Tensor, **kwargs):
         time_jitter = torch.empty(tvec.shape, device=tvec.device).uniform_(-1,1)*0.2 #Add some random jitter to tvec
@@ -127,18 +149,16 @@ class Trainer(nn.Module):
         interp_volume /= self.signal_normalization_const
         return {'volume' : interp_volume, 'tvec' : tvec_grid}
 
-    def _generate_random_mask(self, MC_sampling = False):
-        if not MC_sampling:
-            return self._random_sampling()
-        stacked_masks = []
+    def _collate_validation_masks(self):
+        logging.info(f"Collecting {self.val_MC_samples} random masks for Monte-carlo sampling on {self.num_points} MOLLI acquisitions.")
+        collated_masks = []
         for _ in range(self.val_MC_samples):
-            mask = self._random_sampling()
-            stacked_masks.append(mask)
+            mask = self._sample_random_mask()
+            collated_masks.append(mask)
+        return collated_masks
 
-        return stacked_masks
-
-    def _random_sampling(self):
-        if random.random() <= 0.1:
+    def _sample_random_mask(self):
+        if random.random() <= self.p_full_seq:
             return torch.ones(11, dtype=bool)
         
         mask = torch.zeros(11, dtype=bool)
@@ -149,12 +169,13 @@ class Trainer(nn.Module):
         mask[random_indices] = True
         return mask
     
-
-    
-    @staticmethod
-    def _to_device(volume: torch.Tensor, molli_t1_ref: torch.Tensor, pmap: torch.Tensor, tvec: torch.Tensor, device: str = 'cpu'):
+    def _to_device(self, volume: torch.Tensor, molli_t1_ref: torch.Tensor, pmap: torch.Tensor, tvec: torch.Tensor):
+        device = self.trainer_cfg.device
         return dict(volume=volume.to(device),tvec=tvec.to(device),molli_t1_ref=molli_t1_ref.to(device),
         pmap=pmap.to(device))
+
+
+
 
     # @staticmethod    
     # def update_loss_stats(ref_dict: Union[defaultdict[List], Dict[str, torch.Tensor]], updates_dict: Dict[str, torch.Tensor])
