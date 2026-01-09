@@ -26,7 +26,7 @@ class TrainerConfig:
     """
     Configuration for training and validation.
         Members
-        ----------
+        -------
         epochs:
             Number of training epochs (min 1).
         num_acquisitions:
