@@ -4,8 +4,6 @@ import numpy as np
 import torch
 from torch.utils.data import IterableDataset, get_worker_info
 from scipy.io import loadmat
-
-
 class MOLLIDataset(IterableDataset):
     """
     Stream MOLLI acquisitions stored as MATLAB (.mat) files and yield voxel-wise batches.
@@ -44,9 +42,9 @@ class MOLLIDataset(IterableDataset):
             1) the order of `.mat` files, and
             2) the voxel order within each file (before batching).
         Determinism is controlled by `base_seed + epoch` (see `set_epoch`).
-    tvec_normalization_const:
+    tvec_norm:
         Divisor applied to tvec and T1 reference (e.g., 1000 converts ms -> s).
-    signal_normalization_const:
+    signal_norm:
         Divisor applied to signal readouts.
     base_seed:
         Base seed for deterministic shuffling.
@@ -58,8 +56,8 @@ class MOLLIDataset(IterableDataset):
         batch_size: int = 128,
         drop_last: bool = False,
         shuffle: bool = False,
-        tvec_normalization_const: Union[int, float] = 1000,
-        signal_normalization_const: Union[int, float] = 270,
+        tvec_norm: Union[int, float] = 1000,
+        signal_norm: Union[int, float] = 270,
         base_seed: int = 1234,
         **kwargs,
     ):
@@ -72,6 +70,8 @@ class MOLLIDataset(IterableDataset):
         self.mat_file_paths = sorted(folder.glob("*.mat"))
         if not self.mat_file_paths:
             raise ValueError(f"No .mat files found in: {folder}")
+        self.num_files = len(self.mat_file_paths)
+        self._current_file = 0
 
         if batch_size <= 0:
             raise ValueError("batch_size must be > 0")
@@ -79,18 +79,21 @@ class MOLLIDataset(IterableDataset):
         self.drop_last = bool(drop_last)
 
 
-        self.tvec_normalization_const = float(tvec_normalization_const)
-        self.signal_normalization_const = float(signal_normalization_const)
-        if self.tvec_normalization_const <= 0:
-            raise ValueError("tvec_normalization_const must be > 0")
-        if self.signal_normalization_const <= 0:
-            raise ValueError("signal_normalization_const must be > 0")
+        self.tvec_norm = float(tvec_norm)
+        self.signal_norm = float(signal_norm)
+        if self.tvec_norm <= 0:
+            raise ValueError("tvec_norm must be > 0")
+        if self.signal_norm <= 0:
+            raise ValueError("signal_norm must be > 0")
 
         self.base_seed = int(base_seed)
         self.shuffle = bool(shuffle)
         self._epoch = 0
-        _ = kwargs # make ruff happy
 
+    @property
+    def file_progress(self):
+        return (self._current_file, self.num_files)
+    
     @property
     def epoch(self) -> int:
         return self._epoch
@@ -146,9 +149,9 @@ class MOLLIDataset(IterableDataset):
 
         keep = finite & mask_signal & mask_pmap & mask_t1
 
-        volume = (volume[keep] / self.signal_normalization_const).astype(np.float32, copy=False)
-        molli_t1_ref = (molli_t1_ref[keep] / self.tvec_normalization_const).astype(np.float32, copy=False)
-        tvec = (tvec / self.tvec_normalization_const).astype(np.float32, copy=False)
+        volume = (volume[keep] / self.signal_norm).astype(np.float32, copy=False)
+        molli_t1_ref = (molli_t1_ref[keep] / self.tvec_norm).astype(np.float32, copy=False)
+        tvec = (tvec / self.tvec_norm).astype(np.float32, copy=False)
         pmap = pmap[keep].astype(np.float32, copy=False)
 
         return volume, tvec, molli_t1_ref, pmap
@@ -163,7 +166,8 @@ class MOLLIDataset(IterableDataset):
         if self.shuffle:
             rng.shuffle(file_list)
 
-        for mat_file_path in file_list:
+        for i, mat_file_path in enumerate(file_list, start=1):
+            self._current_file = i
             mat_file = self.read_loadmat(mat_file_path)
             volume, tvec, molli_t1_ref, pmap = self.preprocess(mat_file)
             if volume.shape[0] == 0:
@@ -176,12 +180,10 @@ class MOLLIDataset(IterableDataset):
 
             perm = rng.permutation(volume_t.shape[0]) if self.shuffle else np.arange(volume_t.shape[0])
             end = perm.size - (perm.size % self.batch_size) if self.drop_last else perm.size
-
             for start in range(0, end, self.batch_size):
                 idx = perm[start : start + self.batch_size]
                 batch = {"volume": volume_t[idx], "molli_t1_ref" : t1_t[idx], "pmap" : pmap_t[idx], "tvec" : tvec_t}
                 yield batch
-
     @staticmethod
     def read_loadmat(path: Union[str, pathlib.Path]) -> Dict[str, np.ndarray]:
         """
