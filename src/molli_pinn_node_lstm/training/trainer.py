@@ -106,8 +106,8 @@ class Trainer(nn.Module):
         scheduler: ExponentialLR,
         tensorboard_logger: SummaryWriter,
         molli_loss: PINNLoss,
-        tvec_normalization_const: float,
-        signal_normalization_const: float,
+        tvec_norm: float,
+        signal_norm: float,
         save_ckpt_dir: pathlib.Path,
         device: str,
     ) -> None:
@@ -126,9 +126,9 @@ class Trainer(nn.Module):
             TensorBoard SummaryWriter used to log training/validation losses and LR.
         molli_loss: PINNLoss
             Physics-informed loss for the 3-parameter MOLLI recovery model.
-        tvec_normalization_const:
+        tvec_norm:
             Divisor applied to tvec and T1 reference (e.g., 1000 converts ms -> s).
-        signal_normalization_const:
+        signal_norm:
             Divisor applied to signal readouts.
         save_ckpt_dir:
             Directory where checkpoints and weights are written. The trainer writes:
@@ -149,8 +149,8 @@ class Trainer(nn.Module):
         self.tensorboard_logger = tensorboard_logger
         self.molli_loss = molli_loss
 
-        self.tvec_normalization_const = float(tvec_normalization_const)
-        self.signal_normalization_const = float(signal_normalization_const)
+        self.tvec_norm = float(tvec_norm)
+        self.signal_norm = float(signal_norm)
         self.device = device
 
         self.best_valid_loss = float("inf")
@@ -354,9 +354,9 @@ class Trainer(nn.Module):
         pmap_dict = {"C": pmap[:, 0], "K": pmap[:, 1], "T1_star": pmap[:, 2]}
         time_jitter = torch.empty_like(tvec).uniform_(-1.0, 1.0) * 0.2
         tvec_grid = torch.sort(torch.abs(tvec + time_jitter)).values
-        denorm_tvec_grid = tvec_grid * self.tvec_normalization_const
+        denorm_tvec_grid = tvec_grid * self.tvec_norm
         interp_volume = molli_signal_model.signal_recovery(tvec=denorm_tvec_grid, **pmap_dict)
-        interp_volume /= self.signal_normalization_const
+        interp_volume /= self.signal_norm
         return {"volume": interp_volume.T, "tvec": tvec_grid}
 
     def _collate_validation_masks(self) -> List[torch.Tensor]:
