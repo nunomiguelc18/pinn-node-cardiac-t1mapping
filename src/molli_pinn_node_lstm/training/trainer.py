@@ -157,8 +157,7 @@ class Trainer(nn.Module):
         self.tvec_norm = float(tvec_norm)
         self.signal_norm = float(signal_norm)
         self.device = device
-        self.baseline = baseline
-        
+        self.canonical_name = "full_seq_baseline_" if baseline else ""
         self.best_valid_loss = float("inf")
 
         self.save_ckpt_dir = pathlib.Path(save_ckpt_dir)
@@ -243,7 +242,7 @@ class Trainer(nn.Module):
             )
 
             self._save_checkpoint(
-            path=self.save_ckpt_dir / "latest_checkpoint.pt",
+            path=self.save_ckpt_dir / f"{self.canonical_name}latest_checkpoint.pt",
             best_valid_loss=float(val_loss["total_loss"]),
             epoch=epoch,
             extra={"train_loss": train_loss, "val_loss": val_loss},
@@ -252,13 +251,13 @@ class Trainer(nn.Module):
             if float(val_loss["total_loss"]) < self.best_valid_loss:
                 self.best_valid_loss = float(val_loss["total_loss"])
                 self._save_checkpoint(
-                    path = self.save_ckpt_dir / "best_checkpoint.pt",
+                    path = self.save_ckpt_dir / f"{self.canonical_name}best_checkpoint.pt",
                     best_valid_loss = self.best_valid_loss,
                     epoch=epoch,
                     extra={"train_loss": train_loss, "val_loss": val_loss},
                 )
                 self._save_model_weights(
-                    self.save_ckpt_dir / "best_weights.pt",
+                    self.save_ckpt_dir / f"{self.canonical_name}best_weights.pt",
                     extra={"epoch": epoch, "best_valid_loss": self.best_valid_loss},
                 )
 
