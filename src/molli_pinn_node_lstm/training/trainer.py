@@ -110,34 +110,39 @@ class Trainer(nn.Module):
         signal_norm: float,
         save_ckpt_dir: pathlib.Path,
         device: str,
+        baseline: bool = False
     ) -> None:
         """
         Attributes
         ----------
         trainer_cfg: TrainerConfig
-            Training configuration dataclass defining epochs, acquisition sampling, etc...
+            Training configuration dataclass defining epochs, acquisition sampling, etc.
         model: nn.Module
-            PyTorch module that consumes `volume` and `tvec` and returns a predicted pmap (3-parameters signal model).
+            PyTorch module that consumes `volume` and `tvec` and returns a predicted pmap
+            (3-parameter signal model).
         optimizer: AdamW
             AdamW optimizer used to update `model` parameters.
         scheduler: ExponentialLR
             Exponential learning-rate scheduler stepped once per epoch after validation.
-        tensorboard_logger:
+        tensorboard_logger: SummaryWriter
             TensorBoard SummaryWriter used to log training/validation losses and LR.
         molli_loss: PINNLoss
             Physics-informed loss for the 3-parameter MOLLI recovery model.
-        tvec_norm:
-            Divisor applied to tvec and T1 reference (e.g., 1000 converts ms -> s).
-        signal_norm:
-            Divisor applied to signal readouts.
-        save_ckpt_dir:
+        tvec_norm: float
+            Divisor applied to `tvec` and T1 reference (e.g., 1000 converts ms -> s).
+        signal_norm: float
+            Divisor applied to signal measurements.
+        save_ckpt_dir: pathlib.Path
             Directory where checkpoints and weights are written. The trainer writes:
-              - latest_checkpoint.pt (every epoch)
-              - best_checkpoint.pt (when validation improves)
-              - best_weights.pt (when validation improves)
-        device:
-            Target device string (e.g., "cpu", "cuda", "cuda:0"). All tensors in the training
+            - latest_checkpoint.pt (every epoch)
+            - best_checkpoint.pt (when validation improves)
+            - best_weights.pt (when validation improves)
+        device: str or torch.device
+            Target device (e.g., "cpu", "cuda", "cuda:0"). All tensors in the training
             step are moved to this device.
+        baseline: bool
+            If True, training is performed on baseline data and checkpoints are saved
+            with a canonical name for later loading.
 
         """
         super().__init__()
@@ -152,7 +157,8 @@ class Trainer(nn.Module):
         self.tvec_norm = float(tvec_norm)
         self.signal_norm = float(signal_norm)
         self.device = device
-
+        self.baseline = baseline
+        
         self.best_valid_loss = float("inf")
 
         self.save_ckpt_dir = pathlib.Path(save_ckpt_dir)
