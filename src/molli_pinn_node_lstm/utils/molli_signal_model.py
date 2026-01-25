@@ -1,15 +1,17 @@
 import torch
 
-def _broadcast(tvec, C, K , T1_star):
+
+def _broadcast(tvec, C, K, T1_star):
     if tvec.ndim == 1:
-        tvec = tvec[:, None]
-    if (C.ndim == 2) and (C.shape[-1] == 1):
+        tvec = tvec[None, :]
+    if (C.ndim == 2) and (C.shape[0] == 1):
         C = C.T
-    if (K.ndim == 2) and (K.shape[-1] == 1):
+    if (K.ndim == 2) and (K.shape[0] == 1):
         K = K.T
-    if (T1_star.ndim == 2) and (T1_star.shape[-1] == 1):
+    if (T1_star.ndim == 2) and (T1_star.shape[0] == 1):
         T1_star = T1_star.T
     return tvec, C, K, T1_star
+
 
 def signal_recovery(
     tvec: torch.Tensor,
@@ -24,8 +26,8 @@ def signal_recovery(
 
     Shapes broadcast naturally (e.g., t can be (n,) and parameters (batch, 1)).
     """
-    (tvec, C, K , T1_star) = _broadcast(tvec,C,K,T1_star)
-    # if 
+    (tvec, C, K, T1_star) = _broadcast(tvec, C, K, T1_star)
+
     denom = T1_star + eps
     return C * (1.0 - K * torch.exp(-tvec / denom))
 
@@ -41,7 +43,7 @@ def ds_dt(
     Time derivative of the MOLLI 3-parameter model:
         dS/dt = C*K*exp(-t/T1*) / T1*
     """
-    (tvec, C, K , T1_star) = _broadcast(tvec,C,K,T1_star)
+    (tvec, C, K, T1_star) = _broadcast(tvec, C, K, T1_star)
     denom = T1_star + eps
     return C * K * torch.exp(-tvec / denom) / denom
 
