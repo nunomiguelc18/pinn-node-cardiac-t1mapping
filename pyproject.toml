@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pinn-node-cardiac-t1-mapping"
+version = "1.0.0"
+description = "Source code used in the paper: Physics-Informed Neural ODEs for Temporal Dynamics Modeling in Cardiac T1 Mapping (MICCAI 2025)."
+readme = "README.md"
+requires-python = ">=3.9"
+
+# Keep runtime deps portable here. Don't put pip index settings in pyproject.toml.
+dependencies = [
+  "pyyaml >=6.0, < 7",
+  "matplotlib >=3.8, < 4.0",
+  "torchdyn >=1.0, < 2.0",
+  "tqdm >=4,< 5.0",
+  "torch >=2.7",
+  "tensorboard>=2.0,<3"
+]
+
+[project.optional-dependencies]
+# Use these if you want: pip install ".[torch]"
+torch = ["torch>=2.0"]
+# Convenience extras (still require using the right extra-index-url when installing torch)
+cuda118 = ["torch>=2.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+pinn-molli-train = "molli_pinn_node_lstm.train:main"
+pinn-molli-test  = "molli_pinn_node_lstm.test:main"
