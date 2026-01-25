@@ -1,6 +1,6 @@
 # Physics-Informed Neural ODEs for Temporal Dynamics Modeling in Cardiac $T_1$ Mapping
 
-**MICCAI 2025** · *Early Acceptance (top ~9%)* · **Spotlight Presentation**  
+**MICCAI 2025** · *Early Acceptance (top ~9%)* · **Poster Spotlight**
 📄 [Paper](https://papers.miccai.org/miccai-2025/0698-Paper4475.html) · 📚 [arXiv](https://arxiv.org/abs/2507.00613)
 
 ## Overview
