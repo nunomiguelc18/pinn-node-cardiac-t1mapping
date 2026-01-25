@@ -4,10 +4,12 @@ import torch.nn.functional as F
 from molli_pinn_node_lstm.utils import molli_signal_model
 from typing import Dict
 
+
 class SignalRecoveryLoss(ABC):
     @abstractmethod
-    def compute_loss(self, *args, **kwargs)-> Dict[str, torch.Tensor]:
+    def compute_loss(self, *args, **kwargs) -> Dict[str, torch.Tensor]:
         pass
+
 
 class PINNLoss(SignalRecoveryLoss):
     """
@@ -43,18 +45,28 @@ class PINNLoss(SignalRecoveryLoss):
         gamma = tvec_norm / signal_norm
     to keep dS/dt terms comparable when time and signal are represented in normalized units.
 
-   
+
     The split is clamped to guarantee at least 2 samples in both recovery and saturation regions.
     """
-    def __init__(self, tvec_norm: float, signal_norm: float, 
-                 t_end_recovery: float = 2.0, t_end: float = 4.0, n_grid_samples: int = 1000, p_recovery: float = 0.75, pinn_lambda: float = 1e-2):
+
+    def __init__(
+        self,
+        tvec_norm: float,
+        signal_norm: float,
+        t_end_recovery: float = 2.0,
+        t_end: float = 4.0,
+        n_grid_samples: int = 1000,
+        p_recovery: float = 0.75,
+        pinn_lambda: float = 1e-2,
+    ):
         if t_end <= t_end_recovery:
             raise ValueError("Invalid condition: t_end <= t_end_recovery!")
         if n_grid_samples < 4:
-            raise ValueError("n_grid_samples must be >= 4 to allocate at least 2 samples to both recovery and saturation.")
+            raise ValueError(
+                "n_grid_samples must be >= 4 to allocate at least 2 samples to both recovery and saturation."
+            )
         if not (0.0 <= p_recovery <= 1.0):
             raise ValueError("p_recovery must be in [0, 1].")
-
 
         self.chain_rule_gamma = float(tvec_norm / signal_norm)
         self.tvec_norm = float(tvec_norm)
@@ -69,13 +81,13 @@ class PINNLoss(SignalRecoveryLoss):
         n_recovery = max(2, min(n_recovery, n_grid_samples - 2))
         n_saturation = n_grid_samples - n_recovery
 
-        saturation_gap = 1e-3 #To avoid repeating the same t at boundaries
+        saturation_gap = 1e-3  # To avoid repeating the same t at boundaries
         recovery_grid = torch.linspace(0.0, t_end_recovery, n_recovery)
-        saturation_grid = torch.linspace(t_end_recovery + saturation_gap, t_end, n_saturation)
+        saturation_grid = torch.linspace(
+            t_end_recovery + saturation_gap, t_end, n_saturation
+        )
         self.tvec_grid_cpu = torch.cat([recovery_grid, saturation_grid], dim=0)
-        
 
-    
     def compute_loss(
         self,
         pmap_ref: Dict[str, torch.Tensor],
@@ -105,22 +117,43 @@ class PINNLoss(SignalRecoveryLoss):
             - "dS(t)/dt":   (MSE) derivative consistency term; already scaled by `pinn_lambda`
         """
 
-        anchor = pmap_hat["T1_star"] # ensure we cast to the same device, dtype as our model 
-        pmap_ref = {"C" : pmap_ref[:,0], "K" : pmap_ref[:,1], "T1_star" : pmap_ref[:,2]}
+        anchor = pmap_hat[
+            "T1_star"
+        ]  # ensure we cast to the same device, dtype as our model
+        pmap_ref = {
+            "C": pmap_ref[:, [0]],
+            "K": pmap_ref[:, [1]],
+            "T1_star": pmap_ref[:, [2]],
+        }
         t = self.tvec_grid_cpu.to(device=anchor.device, dtype=anchor.dtype)
 
-        T1_hat = molli_signal_model.t1_from_apparent(K=pmap_hat["K"], T1_star=pmap_hat["T1_star"])
+        T1_hat = molli_signal_model.t1_from_apparent(
+            K=pmap_hat["K"], T1_star=pmap_hat["T1_star"]
+        )
         T1_loss = F.mse_loss(T1_hat, T1_ref, reduction="mean")
 
         denorm_tvec_grid = t * self.tvec_norm
         signal_rec_hat = molli_signal_model.signal_recovery(tvec=t, **pmap_hat)
-        signal_rec_ref = molli_signal_model.signal_recovery(tvec=denorm_tvec_grid, **pmap_ref)
+        signal_rec_ref = molli_signal_model.signal_recovery(
+            tvec=denorm_tvec_grid, **pmap_ref
+        )
         signal_rec_ref = signal_rec_ref / self.signal_norm
         signal_rec_loss = F.mse_loss(signal_rec_hat, signal_rec_ref, reduction="mean")
 
         temp_dynamics_hat = molli_signal_model.ds_dt(tvec=t, **pmap_hat)
-        temp_dynamics_ref = molli_signal_model.ds_dt(tvec=denorm_tvec_grid, **pmap_ref) * self.chain_rule_gamma
-        temp_dynamics_loss = F.mse_loss(temp_dynamics_hat, temp_dynamics_ref, reduction="mean") * self.pinn_lambda
+        temp_dynamics_ref = (
+            molli_signal_model.ds_dt(tvec=denorm_tvec_grid, **pmap_ref)
+            * self.chain_rule_gamma
+        )
+        temp_dynamics_loss = (
+            F.mse_loss(temp_dynamics_hat, temp_dynamics_ref, reduction="mean")
+            * self.pinn_lambda
+        )
 
         total_loss = T1_loss + signal_rec_loss + temp_dynamics_loss
-        return {"total_loss": total_loss, "T1": T1_loss, "S(t)": signal_rec_loss, "dS(t)/dt": temp_dynamics_loss}
+        return {
+            "total_loss": total_loss,
+            "T1": T1_loss,
+            "S(t)": signal_rec_loss,
+            "dS(t)/dt": temp_dynamics_loss,
+        }
