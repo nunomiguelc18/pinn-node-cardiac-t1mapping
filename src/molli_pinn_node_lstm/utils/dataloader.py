@@ -232,7 +232,6 @@ class MOLLIDataset(IterableDataset):
         try:
             pmap = load_data["pmap_mse"].astype(np.float32)
             volume = load_data["volume"].astype(np.float32)
-            myo_mask = load_data["contour"][0][0]
             tvec = np.asarray(load_data["tvec"]).astype(np.float32).flatten()
             null_index = np.asarray(load_data["null_index"]).astype(np.uint8)
             molli_t1_ref = np.asarray(load_data["T1"]).astype(np.float32)
@@ -245,7 +244,6 @@ class MOLLIDataset(IterableDataset):
             "pmap": pmap,
             "null_index": null_index,
             "molli_t1_ref": molli_t1_ref,
-            "myo_mask": myo_mask,
         }
 
     @staticmethod
