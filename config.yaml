@@ -1,0 +1,47 @@
+name: opensource
+
+data:
+  settings:
+    batch_size: 1024
+    tvec_norm: 1000 
+    signal_norm: 270
+  
+  training_folder_path: foo/training_folder
+  validation_folder_path: foo/validation_folder
+  testing_folder_path: foo/testing_folder
+
+
+training:
+  epochs: 1000
+  optimizer:
+    lr: 0.001
+    gamma: 0.95
+    weight_decay: 0.01
+  
+  pinn_loss:
+    t_end_recovery: 2
+    t_end: 4
+    n_grid_samples: 1000
+    p_recovery: 0.75
+    pinn_lambda: 0.01
+  
+  configs:
+    epochs: 100
+    num_acquisitions: 5
+    max_acquisitions: 11
+    p_full_seq: 0.1
+    p_interpolation: 0.1
+    interpolate_readouts: False
+    val_mc_samples: 5
+
+node_lstm:
+  embedding_dim: 128
+  lstm_hidden_size: 128
+  solver : "dopri5"
+  rtol:  0.001
+  atol:  0.001
+  batch_first: True
+  num_layers: 1
+
+
+
