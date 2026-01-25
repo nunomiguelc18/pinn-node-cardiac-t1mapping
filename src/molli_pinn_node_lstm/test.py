@@ -27,8 +27,6 @@ def handle_T1_results(
     output_folder: pathlib.Path,
     file_name: str,
 ) -> None:
-    """Matplotlib qualitative figures plotting."""
-
     fig, axs = plt.subplots(nrows=1, ncols=4, figsize=(18, 4), constrained_layout=True)
 
     for ax in axs:
@@ -54,6 +52,13 @@ def handle_T1_results(
 
     fig.savefig(output_folder / f"{file_name}.png", dpi=300)
     plt.close(fig)
+    np.savez_compressed(
+        output_folder / f"{file_name}.npz",
+        T1=mean_map.astype(np.float32, copy=False),
+        SD=sd_map.astype(np.float32, copy=False),
+        T1_ref=molli_t1_ref.astype(np.float32, copy=False),
+        abs_err=diff,
+    )
 
 
 def set_rng_state_seed(
@@ -290,8 +295,13 @@ def test(args: argparse.Namespace) -> None:
         )
 
         simulations_tracker = []
-        for simulation in range(args.mc_samples):
-            LOGGER.info(f"Evaluating Simulation {simulation}/{args.mc_samples}.")
+        mc_pbar = tqdm(
+            range(args.mc_samples),
+            desc="Monte Carlo Sampling",
+            dynamic_ncols=True,
+            leave=False,
+        )
+        for simulation in mc_pbar:
             random_mask = sample_random_indices(
                 num_acquisitions=molli_acquisitions,
                 max_acquisitions=max_molli_acquisitions,
