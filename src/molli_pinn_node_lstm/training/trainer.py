@@ -57,7 +57,9 @@ class TrainerConfig:
         self.val_mc_samples = max(1, int(self.val_mc_samples))
 
         if not (3 <= int(self.num_acquisitions) <= int(self.max_acquisitions)):
-            raise ValueError("num_acquisitions must be within {3, ... , max_acquisitions}.")
+            raise ValueError(
+                "num_acquisitions must be within {3, ... , max_acquisitions}."
+            )
 
         self.num_acquisitions = int(self.num_acquisitions)
         self.max_acquisitions = int(self.max_acquisitions)
@@ -74,7 +76,7 @@ class TrainerConfig:
 class Trainer(nn.Module):
     """
     Training orchestrator for our Accelerated Physics-Informed Framework for MOLLI signal recovery
-    
+
     This class orchestrates:
       - epoch-wise training and validation loops
       - acquisition subsampling via boolean masks
@@ -84,20 +86,21 @@ class Trainer(nn.Module):
 
     The trainer expects batches in dictionary form with:
 
-      - "volume": torch.Tensor, 
+      - "volume": torch.Tensor,
         MOLLI signal acquisitions.
 
       - "tvec": torch.Tensor
         Inversion times / elapsed time after inversion pulse.
-      
+
       - "pmap": torch.Tensor
         model parameters (c, k, T1*) estimated by least-squares fitting on
         S(t) = c * (1 - k * exp( -t / T1* )), e.g via Levenberg–Marquardt algorithm.
 
-      - "molli_t1_ref": torch.Tensor. 
+      - "molli_t1_ref": torch.Tensor.
         Reference T1 derived from fitted parameters using T1 = T1* (k - 1).
 
     """
+
     def __init__(
         self,
         trainer_cfg: TrainerConfig,
@@ -110,7 +113,7 @@ class Trainer(nn.Module):
         signal_norm: float,
         save_ckpt_dir: pathlib.Path,
         device: str,
-        baseline: bool = False
+        baseline: bool = False,
     ) -> None:
         """
         Attributes
@@ -157,7 +160,9 @@ class Trainer(nn.Module):
         self.tvec_norm = float(tvec_norm)
         self.signal_norm = float(signal_norm)
         self.device = device
-        self.canonical_name = "full_seq_baseline_" if baseline else ""
+        self.canonical_name = (
+            "molli_baseline_" if baseline else f"molli_{trainer_cfg.num_acquisitions}_"
+        )
         self.best_valid_loss = float("inf")
 
         self.save_ckpt_dir = pathlib.Path(save_ckpt_dir)
@@ -209,14 +214,13 @@ class Trainer(nn.Module):
 
         epoch_pbar = tqdm(
             range(1, self.trainer_cfg.epochs + 1),
-            total = self.trainer_cfg.epochs,
+            total=self.trainer_cfg.epochs,
             desc="Epoch",
             position=0,
             dynamic_ncols=True,
         )
 
         for epoch in epoch_pbar:
-            
             train_loss = self._run_training(training_set)
             val_loss = self._run_validation(validation_set)
 
@@ -242,17 +246,18 @@ class Trainer(nn.Module):
             )
 
             self._save_checkpoint(
-            path=self.save_ckpt_dir / f"{self.canonical_name}latest_checkpoint.pt",
-            best_valid_loss=float(val_loss["total_loss"]),
-            epoch=epoch,
-            extra={"train_loss": train_loss, "val_loss": val_loss},
-        )
+                path=self.save_ckpt_dir / f"{self.canonical_name}latest_checkpoint.pt",
+                best_valid_loss=float(val_loss["total_loss"]),
+                epoch=epoch,
+                extra={"train_loss": train_loss, "val_loss": val_loss},
+            )
 
             if float(val_loss["total_loss"]) < self.best_valid_loss:
                 self.best_valid_loss = float(val_loss["total_loss"])
                 self._save_checkpoint(
-                    path = self.save_ckpt_dir / f"{self.canonical_name}best_checkpoint.pt",
-                    best_valid_loss = self.best_valid_loss,
+                    path=self.save_ckpt_dir
+                    / f"{self.canonical_name}best_checkpoint.pt",
+                    best_valid_loss=self.best_valid_loss,
                     epoch=epoch,
                     extra={"train_loss": train_loss, "val_loss": val_loss},
                 )
@@ -268,7 +273,7 @@ class Trainer(nn.Module):
 
         batch_pbar = tqdm(
             training_set,
-            desc=f"Training",
+            desc="Training",
             leave=False,
             position=1,
             dynamic_ncols=True,
@@ -277,7 +282,9 @@ class Trainer(nn.Module):
         for batch in batch_pbar:
             batch = self._move_batch_to_device(batch)
 
-            if self.trainer_cfg.interpolate_readouts and (random.random() <= self.trainer_cfg.p_interpolation):
+            if self.trainer_cfg.interpolate_readouts and (
+                random.random() <= self.trainer_cfg.p_interpolation
+            ):
                 batch.update(self._interpolate_molli_readouts(**batch))
 
             bool_mask = self._sample_random_indices()
@@ -304,7 +311,10 @@ class Trainer(nn.Module):
 
             file_progr = getattr(training_set.dataset, "file_progress", None)
             current, total = file_progr
-            batch_pbar.set_postfix(file_progress = f"{current}/{total}", train_total=float(loss_dict["total_loss"].detach()))
+            batch_pbar.set_postfix(
+                file_progress=f"{current}/{total}",
+                train_total=float(loss_dict["total_loss"].detach()),
+            )
 
         return {k: v / max(1, n_samples) for k, v in sums.items()}
 
@@ -318,7 +328,7 @@ class Trainer(nn.Module):
 
         batch_pbar = tqdm(
             validation_set,
-            desc=f"Validation",
+            desc="Validation",
             leave=False,
             position=2,
             dynamic_ncols=True,
@@ -350,17 +360,23 @@ class Trainer(nn.Module):
 
             file_progr = getattr(validation_set.dataset, "file_progress")
             current, total = file_progr
-            batch_pbar.set_postfix(file_progress = f"{current}/{total}", val_total=mc_sums["total_loss"])
+            batch_pbar.set_postfix(
+                file_progress=f"{current}/{total}", val_total=mc_sums["total_loss"]
+            )
 
         return {k: v / max(1, n_samples) for k, v in sums.items()}
 
-    def _interpolate_molli_readouts(self, tvec: torch.Tensor, pmap: torch.Tensor, **kwargs):
-        """ Augment MOLLI readouts from pmap parameters on a jittered time grid."""
+    def _interpolate_molli_readouts(
+        self, tvec: torch.Tensor, pmap: torch.Tensor, **kwargs
+    ):
+        """Augment MOLLI readouts from pmap parameters on a jittered time grid."""
         pmap_dict = {"C": pmap[:, 0], "K": pmap[:, 1], "T1_star": pmap[:, 2]}
         time_jitter = torch.empty_like(tvec).uniform_(-1.0, 1.0) * 0.2
         tvec_grid = torch.sort(torch.abs(tvec + time_jitter)).values
         denorm_tvec_grid = tvec_grid * self.tvec_norm
-        interp_volume = molli_signal_model.signal_recovery(tvec=denorm_tvec_grid, **pmap_dict)
+        interp_volume = molli_signal_model.signal_recovery(
+            tvec=denorm_tvec_grid, **pmap_dict
+        )
         interp_volume /= self.signal_norm
         return {"volume": interp_volume.T, "tvec": tvec_grid}
 
@@ -369,13 +385,15 @@ class Trainer(nn.Module):
         LOGGER.info(
             f"Collecting {self.trainer_cfg.val_mc_samples} random masks for Monte-carlo sampling on {self.trainer_cfg.num_acquisitions} out of {self.trainer_cfg.max_acquisitions} MOLLI acquisitions.",
         )
-        return [self._sample_random_indices() for _ in range(self.trainer_cfg.val_mc_samples)]
+        return [
+            self._sample_random_indices()
+            for _ in range(self.trainer_cfg.val_mc_samples)
+        ]
 
     def _sample_random_indices(self) -> torch.Tensor:
         """Sample a boolean mask over acquisitions with MOLLI-ish constraints."""
         n = int(self.trainer_cfg.max_acquisitions)
         k = int(self.trainer_cfg.num_acquisitions)
-
         if random.random() <= self.trainer_cfg.p_full_seq or k >= n:
             return torch.ones(n, dtype=torch.bool, device=self.device)
 
@@ -394,7 +412,9 @@ class Trainer(nn.Module):
         mask[idx] = True
         return torch.as_tensor(mask, dtype=torch.bool, device=self.device)
 
-    def _move_batch_to_device(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def _move_batch_to_device(
+        self, batch: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
         """Move batch tensors onto the training device."""
         device = self.device
         return {
@@ -403,11 +423,11 @@ class Trainer(nn.Module):
             "molli_t1_ref": batch["molli_t1_ref"].to(device, non_blocking=True),
             "pmap": batch["pmap"].to(device, non_blocking=True),
         }
-    
+
     def _save_checkpoint(
         self,
         path: pathlib.Path,
-        best_valid_loss : float,
+        best_valid_loss: float,
         epoch: int,
         extra: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -415,7 +435,7 @@ class Trainer(nn.Module):
 
         ckpt = {
             "epoch": int(epoch),
-            "best_valid_loss":  best_valid_loss,
+            "best_valid_loss": best_valid_loss,
             "trainer_cfg": self.trainer_cfg.__dict__,
             "model_state": self.model.state_dict(),
             "optimizer_state": self.optimizer.state_dict(),
@@ -424,16 +444,13 @@ class Trainer(nn.Module):
         }
         torch.save(ckpt, path)
 
-
     def load_checkpoint(
         self,
         path: pathlib.Path,
-        map_location: str | torch.device,
         load_optimizer: bool = True,
         load_scheduler: bool = True,
         strict: bool = True,
     ) -> None:
-        
         """Load a checkpoint from disk into the trainer.
 
         This restores:
@@ -465,11 +482,14 @@ class Trainer(nn.Module):
         Device placement is controlled by your `map_location` and where the module lives.
         """
 
-        ckpt = torch.load(path, map_location=map_location)
+        ckpt = torch.load(path, map_location=self.device)
 
         self.model.load_state_dict(ckpt["model_state"], strict=strict)
-
-        if load_optimizer and "optimizer_state" in ckpt and ckpt["optimizer_state"] is not None:
+        if (
+            load_optimizer
+            and "optimizer_state" in ckpt
+            and ckpt["optimizer_state"] is not None
+        ):
             self.optimizer.load_state_dict(ckpt["optimizer_state"])
 
         if load_scheduler and self.scheduler is not None and "scheduler_state" in ckpt:
@@ -480,7 +500,11 @@ class Trainer(nn.Module):
         if "best_valid_loss" in ckpt and ckpt["best_valid_loss"] is not None:
             self.best_valid_loss = float(ckpt["best_valid_loss"])
 
-
+    def load_model_state_dict(self, path: pathlib.Path, strict=True) -> None:
+        "Load pre-trained model weights."
+        payload = torch.load(path, map_location=self.device)
+        state_dict = payload["model_state"]
+        self.model.load_state_dict(state_dict, strict=strict)
 
     def _save_model_weights(
         self,
@@ -494,8 +518,3 @@ class Trainer(nn.Module):
             "extra": dict(extra) if extra is not None else {},
         }
         torch.save(payload, path)
-    
-
-
-
-    

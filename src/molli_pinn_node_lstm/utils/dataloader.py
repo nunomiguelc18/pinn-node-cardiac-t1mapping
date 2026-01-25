@@ -4,6 +4,8 @@ import numpy as np
 import torch
 from torch.utils.data import IterableDataset, get_worker_info
 from scipy.io import loadmat
+
+
 class MOLLIDataset(IterableDataset):
     """
     Stream MOLLI acquisitions stored as MATLAB (.mat) files and yield voxel-wise batches.
@@ -78,7 +80,6 @@ class MOLLIDataset(IterableDataset):
         self.batch_size = int(batch_size)
         self.drop_last = bool(drop_last)
 
-
         self.tvec_norm = float(tvec_norm)
         self.signal_norm = float(signal_norm)
         if self.tvec_norm <= 0:
@@ -93,7 +94,7 @@ class MOLLIDataset(IterableDataset):
     @property
     def file_progress(self):
         return (self._current_file, self.num_files)
-    
+
     @property
     def epoch(self) -> int:
         return self._epoch
@@ -122,7 +123,7 @@ class MOLLIDataset(IterableDataset):
         volume = mat_file["volume"]
 
         # to avoid mutating the original loaded arrays
-        tvec = mat_file["tvec"].copy() 
+        tvec = mat_file["tvec"].copy()
         null_index = mat_file["null_index"].copy()
 
         pmap = mat_file["pmap"]
@@ -142,7 +143,9 @@ class MOLLIDataset(IterableDataset):
 
         mask_t1 = (molli_t1_ref[:, 0] > 20) & (molli_t1_ref[:, 0] < 3000)
 
-        t1_star = pmap[:, -1] # Filter noisy param estimates that may pass other masking thresholds 
+        t1_star = pmap[
+            :, -1
+        ]  # Filter noisy param estimates that may pass other masking thresholds
         mask_pmap = (t1_star > 20) & (t1_star < 4000)
 
         mask_signal = (max_abs > 25) & (max_abs < 600)
@@ -150,15 +153,21 @@ class MOLLIDataset(IterableDataset):
         keep = finite & mask_signal & mask_pmap & mask_t1
 
         volume = (volume[keep] / self.signal_norm).astype(np.float32, copy=False)
-        molli_t1_ref = (molli_t1_ref[keep] / self.tvec_norm).astype(np.float32, copy=False)
+        molli_t1_ref = (molli_t1_ref[keep] / self.tvec_norm).astype(
+            np.float32, copy=False
+        )
         tvec = (tvec / self.tvec_norm).astype(np.float32, copy=False)
         pmap = pmap[keep].astype(np.float32, copy=False)
 
         return volume, tvec, molli_t1_ref, pmap
 
-    def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
+    def __iter__(
+        self,
+    ) -> Iterator[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
         if get_worker_info() is not None:
-            raise RuntimeError("MOLLIDataset is single-worker only. Use DataLoader(num_workers=0).")
+            raise RuntimeError(
+                "MOLLIDataset is single-worker only. Use DataLoader(num_workers=0)."
+            )
 
         file_list = list(self.mat_file_paths)
         rng = np.random.default_rng(self.base_seed + self.epoch)
@@ -178,12 +187,26 @@ class MOLLIDataset(IterableDataset):
             t1_t = torch.from_numpy(np.ascontiguousarray(molli_t1_ref))
             pmap_t = torch.from_numpy(np.ascontiguousarray(pmap))
 
-            perm = rng.permutation(volume_t.shape[0]) if self.shuffle else np.arange(volume_t.shape[0])
-            end = perm.size - (perm.size % self.batch_size) if self.drop_last else perm.size
+            perm = (
+                rng.permutation(volume_t.shape[0])
+                if self.shuffle
+                else np.arange(volume_t.shape[0])
+            )
+            end = (
+                perm.size - (perm.size % self.batch_size)
+                if self.drop_last
+                else perm.size
+            )
             for start in range(0, end, self.batch_size):
                 idx = perm[start : start + self.batch_size]
-                batch = {"volume": volume_t[idx], "molli_t1_ref" : t1_t[idx], "pmap" : pmap_t[idx], "tvec" : tvec_t}
+                batch = {
+                    "volume": volume_t[idx],
+                    "molli_t1_ref": t1_t[idx],
+                    "pmap": pmap_t[idx],
+                    "tvec": tvec_t,
+                }
                 yield batch
+
     @staticmethod
     def read_loadmat(path: Union[str, pathlib.Path]) -> Dict[str, np.ndarray]:
         """
@@ -209,6 +232,7 @@ class MOLLIDataset(IterableDataset):
         try:
             pmap = load_data["pmap_mse"].astype(np.float32)
             volume = load_data["volume"].astype(np.float32)
+            myo_mask = load_data["contour"][0][0]
             tvec = np.asarray(load_data["tvec"]).astype(np.float32).flatten()
             null_index = np.asarray(load_data["null_index"]).astype(np.uint8)
             molli_t1_ref = np.asarray(load_data["T1"]).astype(np.float32)
@@ -221,6 +245,7 @@ class MOLLIDataset(IterableDataset):
             "pmap": pmap,
             "null_index": null_index,
             "molli_t1_ref": molli_t1_ref,
+            "myo_mask": myo_mask,
         }
 
     @staticmethod
@@ -250,7 +275,9 @@ class MOLLIDataset(IterableDataset):
                 f"null_index shape {null_index.shape} must match (H,W) {volume.shape[:2]}"
             )
 
-        null_index = np.clip(null_index, 0, tvec.size).astype(null_index.dtype, copy=False)
+        null_index = np.clip(null_index, 0, tvec.size).astype(
+            null_index.dtype, copy=False
+        )
         order = np.argsort(tvec)
         sorted_tvec = tvec[order]
         vol = volume[:, :, order]
