@@ -110,16 +110,12 @@ Run `--help` with either command to view all available parameters and recommende
 ### Citation
 
 ```bibtex
-@InProceedings{10.1007/978-3-032-04927-8_47,
-author="Capit{\~a}o, Nuno
-and Zhang, Yi
-and Zhao, Yidong
-and Tao, Qian",
-title="Physics-Informed Neural ODEs for Temporal Dynamics Modeling in Cardiac {\$}{\$}T{\_}1{\$}{\$}Mapping",
-booktitle="Medical Image Computing and Computer Assisted Intervention -- MICCAI 2025",
-publisher="Springer Nature Switzerland",
-pages="492--501",
-year={2025},
-organization={Springer}
+@inproceedings{capitao2025pinn_node_t1,
+  title     = {Physics-Informed Neural ODEs for Temporal Dynamics Modeling in Cardiac {$T_1$} Mapping},
+  author    = {Capit{\~a}o, Nuno and Zhang, Yi and Zhao, Yidong and Tao, Qian},
+  booktitle = {Medical Image Computing and Computer-Assisted Intervention -- MICCAI 2025},
+  pages     = {492--501},
+  year      = {2025},
+  publisher = {Springer Nature Switzerland}
 }
 ```
